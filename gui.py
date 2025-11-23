@@ -1,0 +1,257 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+import joblib
+from tensorflow import keras
+import pickle
+
+# Page configuration
+st.set_page_config(
+    page_title="Mental Health Detection",
+    page_icon="🧠",
+    layout="wide"
+)
+
+# Title and description
+st.title("🧠 Mental Health Detection System")
+st.markdown("Analyze text using ML and Deep Learning models to detect mental health concerns")
+
+# Load models and preprocessors
+@st.cache_resource
+def load_models_and_preprocessors():
+    """Load all models and preprocessing tools"""
+    try:
+        # Load classical ML model and its preprocessor
+        classical_model = joblib.load('best_classical_model.pkl')
+        tfidf_vectorizer = joblib.load('tfidf_vectorizer.pkl')
+        preprocessor = joblib.load('preprocessor.pkl')
+        
+        # Load LSTM model and its tokenizer
+        lstm_model = keras.models.load_model('mental_health_lstm_model.h5')
+        with open('tokenizer.pkl', 'rb') as f:
+            tokenizer = pickle.load(f)
+        
+        return {
+            'classical_model': classical_model,
+            'tfidf_vectorizer': tfidf_vectorizer,
+            'preprocessor': preprocessor,
+            'lstm_model': lstm_model,
+            'tokenizer': tokenizer
+        }
+    except Exception as e:
+        st.error(f"Error loading models: {str(e)}")
+        return None
+
+# Load everything at startup
+models_dict = load_models_and_preprocessors()
+
+# Sidebar for model selection
+st.sidebar.header("Model Selection")
+
+# Model options
+model_options = {
+    "Classical ML Model": "classical",
+    "LSTM Deep Learning Model": "lstm"
+}
+
+selected_model_name = st.sidebar.selectbox(
+    "Select Model:",
+    list(model_options.keys())
+)
+
+selected_model_type = model_options[selected_model_name]
+
+# Display model info
+st.sidebar.markdown("---")
+st.sidebar.info(f"**Selected Model:** {selected_model_name}")
+
+# Add model description
+if selected_model_type == "classical":
+    st.sidebar.markdown("""
+    **Classical ML Model**
+    - Uses TF-IDF vectorization
+    - Traditional machine learning algorithm
+    - Fast inference
+    """)
+else:
+    st.sidebar.markdown("""
+    **LSTM Model**
+    - Deep learning architecture
+    - Captures sequential patterns
+    - Better for complex contexts
+    """)
+
+# Main content area
+col1, col2 = st.columns([2, 1])
+
+with col1:
+    st.subheader("Input Text")
+    text_input = st.text_area(
+        "Enter text to analyze:",
+        height=200,
+        placeholder="Type or paste text here for mental health analysis..."
+    )
+    
+    col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 3])
+    with col_btn1:
+        predict_button = st.button("🔍 Analyze", type="primary", use_container_width=True)
+    with col_btn2:
+        clear_button = st.button("🗑️ Clear", use_container_width=True)
+
+with col2:
+    st.subheader("Quick Examples")
+    examples = [
+        "I feel so hopeless and nothing seems to matter anymore",
+        "I'm constantly worried about everything in my life",
+        "I can't sleep and feel exhausted all the time",
+        "I'm having a great day and feeling very positive!"
+    ]
+    
+    for i, example in enumerate(examples):
+        if st.button(f"Example {i+1}", key=f"ex_{i}", use_container_width=True):
+            text_input = example
+            st.rerun()
+
+# Prediction functions
+def predict_classical(text, models_dict):
+    """Predict using classical ML model"""
+    try:
+        # Preprocess the text
+        if models_dict['preprocessor'] is not None:
+            processed_text = models_dict['preprocessor'].transform([text])
+        else:
+            processed_text = [text]
+        
+        # Vectorize using TF-IDF
+        text_vectorized = models_dict['tfidf_vectorizer'].transform(processed_text)
+        
+        # Get prediction and probabilities
+        prediction = models_dict['classical_model'].predict(text_vectorized)[0]
+        
+        # Try to get probability scores if available
+        if hasattr(models_dict['classical_model'], 'predict_proba'):
+            probabilities = models_dict['classical_model'].predict_proba(text_vectorized)[0]
+            classes = models_dict['classical_model'].classes_
+        else:
+            # If no predict_proba, just return binary
+            probabilities = [1.0]
+            classes = [prediction]
+        
+        return prediction, probabilities, classes
+    
+    except Exception as e:
+        st.error(f"Prediction error: {str(e)}")
+        return None, None, None
+
+def predict_lstm(text, models_dict):
+    """Predict using LSTM model"""
+    try:
+        # Tokenize and pad the text
+        tokenizer = models_dict['tokenizer']
+        sequence = tokenizer.texts_to_sequences([text])
+        
+        # Pad sequence (adjust max_length based on your training)
+        from tensorflow.keras.preprocessing.sequence import pad_sequences
+        max_length = 100  # Adjust this to match your training
+        padded_sequence = pad_sequences(sequence, maxlen=max_length, padding='post')
+        
+        # Get prediction
+        probabilities = models_dict['lstm_model'].predict(padded_sequence, verbose=0)[0]
+        
+        # Assuming binary or multi-class classification
+        if len(probabilities.shape) == 0 or probabilities.shape[0] == 1:
+            # Binary classification
+            prediction = "Concern Detected" if probabilities[0] > 0.5 else "No Concern"
+            classes = ["No Concern", "Concern Detected"]
+            probabilities = [1 - probabilities[0], probabilities[0]]
+        else:
+            # Multi-class classification
+            classes = [f"Class {i}" for i in range(len(probabilities))]
+            # Update with actual class names if you have them
+            # classes = ['Depression', 'Anxiety', 'Stress', 'No Concern']
+            prediction_idx = np.argmax(probabilities)
+            prediction = classes[prediction_idx]
+        
+        return prediction, probabilities, classes
+    
+    except Exception as e:
+        st.error(f"Prediction error: {str(e)}")
+        return None, None, None
+
+# Handle clear button
+if clear_button:
+    st.rerun()
+
+# Handle predictions
+if predict_button:
+    if not text_input.strip():
+        st.error("⚠️ Please enter some text to analyze")
+    elif models_dict is None:
+        st.error("⚠️ Models failed to load. Please check your model files.")
+    else:
+        with st.spinner(f"Running {selected_model_name}..."):
+            # Make prediction based on selected model
+            if selected_model_type == "classical":
+                prediction, probabilities, classes = predict_classical(text_input, models_dict)
+            else:
+                prediction, probabilities, classes = predict_lstm(text_input, models_dict)
+            
+            if prediction is not None:
+                # Display results
+                st.markdown("---")
+                st.subheader("📊 Analysis Results")
+                
+                # Main prediction
+                max_prob = max(probabilities)
+                col_res1, col_res2 = st.columns(2)
+                with col_res1:
+                    st.metric("Predicted Class", prediction)
+                with col_res2:
+                    st.metric("Confidence", f"{max_prob*100:.2f}%")
+                
+                # Confidence level indicator
+                if max_prob > 0.8:
+                    st.success("✅ High confidence prediction")
+                elif max_prob > 0.6:
+                    st.info("ℹ️ Moderate confidence prediction")
+                else:
+                    st.warning("⚠️ Low confidence prediction - results may be uncertain")
+                
+                # All scores
+                st.subheader("All Class Probabilities")
+                
+                # Create DataFrame for visualization
+                scores_df = pd.DataFrame({
+                    'Class': classes,
+                    'Probability': [f"{p*100:.2f}%" for p in probabilities],
+                    'Score': probabilities
+                }).sort_values('Score', ascending=False)
+                
+                # Display as bar chart
+                st.bar_chart(scores_df.set_index('Class')['Score'])
+                
+                # Display as table
+                st.dataframe(
+                    scores_df[['Class', 'Probability']],
+                    hide_index=True,
+                    use_container_width=True
+                )
+                
+                # Disclaimer
+                st.markdown("---")
+                st.warning("⚠️ **Disclaimer:** This is an automated analysis tool and should not replace professional mental health assessment. If you're experiencing mental health concerns, please consult a qualified healthcare professional.")
+
+# Footer
+st.markdown("---")
+st.markdown("""
+### About the Models
+- **Classical ML Model:** Uses TF-IDF features with traditional machine learning
+- **LSTM Model:** Deep learning model that captures sequential patterns in text
+
+### Files Used
+- `best_classical_model.pkl` - Trained ML classifier
+- `mental_health_lstm_model.h5` - Trained LSTM model
+- `tfidf_vectorizer.pkl` - Text-to-features converter (for ML model)
+- `tokenizer.pkl` - Text-to-sequences converter (for LSTM)
+- `preprocessor.pkl` - Text preprocessing pipeline
+""")
