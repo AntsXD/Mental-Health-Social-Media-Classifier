@@ -1,2 +1,5 @@
 *.csv
 code_explanation.md
+*.h5
+*.pkl
+*.bin
