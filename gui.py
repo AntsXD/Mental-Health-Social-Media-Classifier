@@ -4,6 +4,78 @@ import numpy as np
 import joblib
 from tensorflow import keras
 import pickle
+import re
+from nltk.corpus import stopwords
+from nltk.stem import WordNetLemmatizer, PorterStemmer
+from nltk.tokenize import word_tokenize
+import nltk
+
+# Download required NLTK data
+@st.cache_resource
+def download_nltk_data():
+    try:
+        nltk.download('stopwords', quiet=True)
+        nltk.download('wordnet', quiet=True)
+        nltk.download('punkt', quiet=True)
+        nltk.download('punkt_tab', quiet=True)  # Added this
+        nltk.download('omw-1.4', quiet=True)
+    except:
+        pass
+
+download_nltk_data()
+
+# Define the AdvancedTextPreprocessor class
+class AdvancedTextPreprocessor:
+    """Comprehensive text preprocessing pipeline"""
+    def __init__(self):
+        self.lemmatizer = WordNetLemmatizer()
+        self.stemmer = PorterStemmer()
+        self.stop_words = set(stopwords.words('english'))
+        # Keep negations and important words for mental health
+        self.stop_words -= {'not', 'no', 'nor', 'neither', 'never', 'none'}
+    
+    def clean_text(self, text):
+        """Basic cleaning"""
+        text = str(text).lower()
+        text = re.sub(r'http\S+|www\S+|https\S+', '', text)  # URLs
+        text = re.sub(r'@\w+', '', text)  # Mentions
+        text = re.sub(r'#(\w+)', r'\1', text)  # Hashtags (keep word)
+        text = re.sub(r'[^a-zA-Z\s]', '', text)  # Special chars
+        text = re.sub(r'\s+', ' ', text).strip()  # Extra spaces
+        return text
+    
+    def tokenize_text(self, text):
+        """Tokenization using NLTK"""
+        return word_tokenize(text)
+    
+    def remove_stopwords(self, tokens):
+        """Remove stopwords"""
+        return [token for token in tokens if token not in self.stop_words]
+    
+    def lemmatize_tokens(self, tokens):
+        """Lemmatization"""
+        return [self.lemmatizer.lemmatize(token) for token in tokens]
+    
+    def stem_tokens(self, tokens):
+        """Stemming"""
+        return [self.stemmer.stem(token) for token in tokens]
+    
+    def preprocess(self, text, use_stemming=False):
+        """Complete preprocessing pipeline"""
+        cleaned = self.clean_text(text)
+        tokens = self.tokenize_text(cleaned)
+        tokens = self.remove_stopwords(tokens)
+        if use_stemming:
+            tokens = self.stem_tokens(tokens)
+        else:
+            tokens = self.lemmatize_tokens(tokens)
+        return tokens, ' '.join(tokens)
+    
+    def transform(self, texts):
+        """Transform method for compatibility with sklearn pipelines"""
+        if isinstance(texts, str):
+            texts = [texts]
+        return [self.preprocess(text)[1] for text in texts]
 
 # Page configuration
 st.set_page_config(
@@ -30,6 +102,8 @@ def load_models_and_preprocessors():
         lstm_model = keras.models.load_model('mental_health_lstm_model.h5')
         with open('tokenizer.pkl', 'rb') as f:
             tokenizer = pickle.load(f)
+        
+        st.sidebar.success("✅ All models loaded successfully!")
         
         return {
             'classical_model': classical_model,
@@ -86,11 +160,21 @@ col1, col2 = st.columns([2, 1])
 
 with col1:
     st.subheader("Input Text")
+    
+    # Initialize session state if not exists
+    if 'text_input' not in st.session_state:
+        st.session_state.text_input = ""
+    
     text_input = st.text_area(
         "Enter text to analyze:",
+        value=st.session_state.text_input,
         height=200,
-        placeholder="Type or paste text here for mental health analysis..."
+        placeholder="Type or paste text here for mental health analysis...",
+        key="text_area_input"
     )
+    
+    # Update session state when text changes
+    st.session_state.text_input = text_input
     
     col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 3])
     with col_btn1:
@@ -98,19 +182,7 @@ with col1:
     with col_btn2:
         clear_button = st.button("🗑️ Clear", use_container_width=True)
 
-with col2:
-    st.subheader("Quick Examples")
-    examples = [
-        "I feel so hopeless and nothing seems to matter anymore",
-        "I'm constantly worried about everything in my life",
-        "I can't sleep and feel exhausted all the time",
-        "I'm having a great day and feeling very positive!"
-    ]
-    
-    for i, example in enumerate(examples):
-        if st.button(f"Example {i+1}", key=f"ex_{i}", use_container_width=True):
-            text_input = example
-            st.rerun()
+
 
 # Prediction functions
 def predict_classical(text, models_dict):
@@ -126,15 +198,20 @@ def predict_classical(text, models_dict):
         text_vectorized = models_dict['tfidf_vectorizer'].transform(processed_text)
         
         # Get prediction and probabilities
-        prediction = models_dict['classical_model'].predict(text_vectorized)[0]
+        prediction_raw = models_dict['classical_model'].predict(text_vectorized)[0]
+        
+        # Map 0/1 to readable labels (FLIPPED: 0=Concern, 1=No Concern)
+        label_map = {1: "Mental Health Concern", 0: "No Mental Health Concern"}
         
         # Try to get probability scores if available
         if hasattr(models_dict['classical_model'], 'predict_proba'):
             probabilities = models_dict['classical_model'].predict_proba(text_vectorized)[0]
-            classes = models_dict['classical_model'].classes_
+            classes = [label_map.get(cls, str(cls)) for cls in models_dict['classical_model'].classes_]
+            prediction = label_map.get(prediction_raw, str(prediction_raw))
         else:
             # If no predict_proba, just return binary
             probabilities = [1.0]
+            prediction = label_map.get(prediction_raw, str(prediction_raw))
             classes = [prediction]
         
         return prediction, probabilities, classes
@@ -158,17 +235,20 @@ def predict_lstm(text, models_dict):
         # Get prediction
         probabilities = models_dict['lstm_model'].predict(padded_sequence, verbose=0)[0]
         
+        # Map 0/1 to readable labels (FLIPPED: 0=Concern, 1=No Concern)
+        label_map = {0: "Mental Health Concern", 1: "No Mental Health Concern"}
+        
         # Assuming binary or multi-class classification
         if len(probabilities.shape) == 0 or probabilities.shape[0] == 1:
             # Binary classification
-            prediction = "Concern Detected" if probabilities[0] > 0.5 else "No Concern"
-            classes = ["No Concern", "Concern Detected"]
-            probabilities = [1 - probabilities[0], probabilities[0]]
+            prob_value = float(probabilities[0]) if len(probabilities.shape) > 0 else float(probabilities)
+            prediction = label_map[0] if prob_value > 0.5 else label_map[1]
+            classes = [label_map[0], label_map[1]]
+            probabilities = [prob_value, 1 - prob_value]
         else:
             # Multi-class classification
-            classes = [f"Class {i}" for i in range(len(probabilities))]
             # Update with actual class names if you have them
-            # classes = ['Depression', 'Anxiety', 'Stress', 'No Concern']
+            classes = [label_map.get(i, f"Class {i}") for i in range(len(probabilities))]
             prediction_idx = np.argmax(probabilities)
             prediction = classes[prediction_idx]
         
@@ -180,6 +260,7 @@ def predict_lstm(text, models_dict):
 
 # Handle clear button
 if clear_button:
+    st.session_state.text_input = ""
     st.rerun()
 
 # Handle predictions
