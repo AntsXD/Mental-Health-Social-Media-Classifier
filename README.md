@@ -15,8 +15,8 @@ Mental health issues affect millions globally, and social media provides early s
 
 The project uses two Kaggle datasets:
 
-1. **Mental Health Dataset**
-   - URL: https://www.kaggle.com/datasets/bhavikjikadara/mental-health-dataset
+1. **Depression: Reddit Dataset (Cleaned)**
+   - URL: https://www.kaggle.com/datasets/infamouscoder/depression-reddit-cleaned
    - Download and place as `Mental_Health_Dataset.csv`
 
 2. **Twitter Depression Dataset**
@@ -133,21 +133,14 @@ This will execute all steps:
 11. Generate visualizations
 12. Save models
 
-**Expected Runtime:** 10-30 minutes (depending on dataset size and hardware)
+### Option 2 : To use streamlit please use:
 
-### Option 2: Use Jupyter Notebook
 ```bash
-# Convert to notebook format
-jupyter nbconvert --to notebook mental_health_classifier.py
-
-# Or manually copy code cells into a new notebook
-jupyter notebook
+streamlit run gui.py 
 ```
 
-### Option 3: Run in Google Colab
-1. Upload the `.py` file to Google Colab
-2. Upload datasets or mount Google Drive
-3. Run cells sequentially
+Make sure to have the models and all pipelines in the same directory
+
 
 ---
 
@@ -322,7 +315,9 @@ tfidf_vectorizer = TfidfVectorizer(max_features=500)  # Instead of 1000
 ## References
 
 ### Datasets:
-- Jikadara, B. (2024). Mental Health Dataset. Kaggle.
+Datasets have been modified a bit
+
+- InFamousCoder (2022). Depression: Reddit Dataset (Cleaned). Kaggle.
 - Hyunkic. (2024). Twitter Depression Dataset. Kaggle.
 
 ### Libraries:
