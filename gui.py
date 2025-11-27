@@ -223,9 +223,15 @@ def predict_classical(text, models_dict):
 def predict_lstm(text, models_dict):
     """Predict using LSTM model"""
     try:
-        # Tokenize and pad the text
+        # FIXED: Add preprocessing step for LSTM model
+        if models_dict['preprocessor'] is not None:
+            processed_text = models_dict['preprocessor'].transform([text])[0]
+        else:
+            processed_text = text
+        
+        # Tokenize and pad the preprocessed text
         tokenizer = models_dict['tokenizer']
-        sequence = tokenizer.texts_to_sequences([text])
+        sequence = tokenizer.texts_to_sequences([processed_text])
         
         # Pad sequence (adjust max_length based on your training)
         from tensorflow.keras.preprocessing.sequence import pad_sequences
